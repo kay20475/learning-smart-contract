@@ -33,7 +33,7 @@ cleos set contract eosio.token ../eosio.token
 cleos get code eosio.token 
 ```
 
-![image](eosio.token/code-hash.jpeg)
+![image](eosio.token/code-hash.png)
 
 hash值存在说明已成功部署。
 
