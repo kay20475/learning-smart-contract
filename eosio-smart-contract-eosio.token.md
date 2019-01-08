@@ -77,7 +77,7 @@ void token::create( name   issuer,
 - `issuer`: 发行token的账户
 - `maximum_supply`: 最大可发行量
 
-`stats`是在token.hpp中已经定义的multi_index表，用于记录token的当前可流通量、总的可发行量以及发行的账户其结构如下：
+`stats`是在token.hpp中已经定义的multi_index表，用于记录token的当前可流通量、总的可发行量以及发行的账户，其结构如下：
 ```c++
 struct [[eosio::table]] currency_stats {
     asset    supply;
@@ -111,14 +111,14 @@ typedef eosio::multi_index< "stat"_n, currency_stats > stats;
 - `payer`: 支付RAM的账户
 - `more`: 是否还有未显示数据
 
-上述过程创建了可以发行的token，但是在市面上还不能流通，因为supply里面是0，这时候需要`issue`action来空投或发币增加市面上可以流通的数量。
+上述过程创建了可以发行的token`SYS`，但是在市面上还不能流通，因为`supply`的值为`0`，需要通过`issue`action空投或发币来增加市面上可以流通的数量。
 
 ## 空投或发币(issue)
 
 ```
 cleos push action eosio.token issue ‘[“meetonetest1”,”1000.0000 SYS”，”airdrop”]’ -p eosio 
 ```
-空投时需要eosio.token合约中的`issue`action，第一个参数是空投到的账户名，第二个是空投的数量，第三个参数是留言信息，action的权限必须提供是`create`时候的`issuer`账户的权限。
+空投时需要eosio.token合约中的`issue`action，第一个参数是被空投的账户名，第二个是空投的数量，第三个参数是留言信息，action的权限必须提供是`create`时候的`issuer`账户的权限。
 
 ### 源码分析
 
@@ -146,7 +146,7 @@ void token::issue( name to, asset quantity, string memo )
     statstable.modify( st, same_payer, [&]( auto& s ) {
        s.supply += quantity;
     });
-   //修改issuer账户下balance的值
+   //先增加issuer账户下balance的值
     add_balance( st.issuer, quantity, st.issuer );
    //这是个内敛action如果to不是issuer，则issuer会调用该合约的action方法给to账户转账
     if( to != st.issuer ) {
@@ -156,7 +156,7 @@ void token::issue( name to, asset quantity, string memo )
     }
 }
 ```
-`issue`每发行一次会增加市面上可流通的token总数。不过空投也是不小的开销，不管是首次空投给新账户还是给自身，`add_balance`的时候都会创建一张`accunts`表，`add_balance`是内部函数，三个参数分别时`owner`（token发行账户）、`quantity`（空投金额）和`ram_payer`（ram支付账号），创建这张表会消耗`240byte`的ram，空投的用户量很大的话，这将会是一笔很大的ram消耗。但是当用户相互使用`transfer`action来转账时会有`128byte`的ram会返回给空投的账户，这`128byte`的ram会由转帐的用户来支付，而`112byte`则是空投账户的固定消耗，只有当用户`close`这个token时才会被完全释放，`close`会在下文中提到。
+`issue`每发行一次会增加市面上可流通的token总数。不过空投也是不小的开销，不管是首次空投给新账户还是给自身，`add_balance`的时候都会先给`issuer`自身创建一张`accounts`表，`add_balance`是内部函数，三个参数分别是`owner`（token发行账户）、`quantity`（空投金额）和`ram_payer`（ram支付账号），创建这张表会消耗`240byte`的ram，同样空投给新用户的话，也会消耗相同的ram为用户创建`accounts`表，空投的用户量很大的话，这将会是一笔很大的ram消耗。但是当用户使用`transfer`action来转账时会有`128byte`的ram会返回给空投的账户，这`128byte`的ram会由转帐的用户自己来支付，而`112byte`则是空投账户的固定消耗，只有当用户`close`这个token时才会被完全释放，`close`会在下文中提到。
 ```c++
 void token::add_balance( name owner, asset value, name ram_payer )
 {
@@ -188,6 +188,7 @@ void token::add_balance( name owner, asset value, name ram_payer )
 ## 转账(transfer)
 
 命令行提供了两种转账方式：
+
 **方式一：**
 ```
 cleos push action eosio.token transfer '["meetonetest1","meetonetest2","10.0000 SYS","for transfer"]' -p meetonetest1 
@@ -246,7 +247,7 @@ void token::sub_balance( name owner, asset value ) {
       });
 }
 ```
-如前文所述转账提供了两种方式，虽然都实现转账功能，但是有一点不同的是不管转入账户是不是第一次被空投该token第一种方式转账的时候需要消耗的是转出账户的ram，若转入账户不是第一次空投该token则第二种方式不会消耗转出账户的ram。
+空投时ram payer是`issuer`，空投后的首次转账，ram payer会变为转账时候的`from`账户。直到由用户自己转出时，ram payer会一直固定为用户本身。
 
 ![image](eosio.token/eosio.token-transfer-action-meetonetest2-accounts.png)
 
@@ -288,7 +289,7 @@ void token::retire( asset quantity, string memo )
 ```
 - `quantity`: 缩减数量
 - `memo`: 留言
-和`issue`action流程类似相同，只是在最后对`stat`表中的操作时`retire`是用的`sub_balance`来减少流通量，而`issue`是`add_balance`来增加流通量。
+和`issue`action流程类似相同，只是在最后对`stat`表的操作时`retire`是用的`sub_balance`来减少流通量，而`issue`是`add_balance`来增加流通量。
 执行完上述`retire`命令后:
 
 ![image](eosio.token/eosio.token-retire-action-stat.png)
